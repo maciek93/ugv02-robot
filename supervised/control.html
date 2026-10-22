@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robot camera</title>
+<style>body{margin:0;background:#111;color:#eee;font:16px system-ui,sans-serif;text-align:center}main{max-width:1000px;margin:auto;padding:18px}img{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;background:#050505;border-radius:8px}button{width:100%;padding:20px;margin-top:16px;border:0;border-radius:8px;background:#cc263c;color:white;font:700 27px system-ui;cursor:pointer}button:active{background:#8b1020}p{min-height:24px;color:#ccc}</style>
+<main><img id="camera" alt="Camera is off"><button id="stop">STOP</button><p id="message" aria-live="polite">Camera is off.</p></main>
+<script>
+const csrf='__CSRF__';let busy=false;
+async function post(path){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':csrf},body:'{}'});if(!r.ok)throw Error('Robot connection unavailable');return r.json()}
+document.getElementById('stop').onclick=async()=>{try{await post('/human/stop');document.getElementById('message').textContent='Stopped.'}catch(e){document.getElementById('message').textContent='STOP could not reach the robot. Its movement timeout remains active.'}};
+async function update(){if(busy||document.visibilityState!=='visible')return;busy=true;try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error('Connection unavailable');const state=await r.json();if(state.state==='active'){await post('/human/heartbeat');document.getElementById('camera').src='/image/frame?t='+Date.now();document.getElementById('message').textContent=state.moving?'Moving.':state.blocking_reason?'Stopped: '+state.blocking_reason:'Camera live. Robot stopped.'}else{document.getElementById('camera').removeAttribute('src');document.getElementById('message').textContent='Camera is off. Session controlled from chat.'}}catch(e){document.getElementById('message').textContent='Robot connection unavailable.'}finally{busy=false}}
+function leave(){fetch('/human/stop',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-CSRF':csrf},body:'{}'}).catch(()=>{})}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')leave()});window.addEventListener('pagehide',leave);setInterval(update,150);update();
+</script></html>

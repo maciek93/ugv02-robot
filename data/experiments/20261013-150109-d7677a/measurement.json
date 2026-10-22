@@ -1,0 +1,23 @@
+{
+  "travel_mm": 125,
+  "direction": "backwards",
+  "approximate": true,
+  "human_notes": "it moved backwards by about 125 milimeters",
+  "requested_motor_s": 2,
+  "motor_command_span_s": 2.0100890000001073,
+  "action": "continuous_forward",
+  "configuration": {
+    "configuration_id": "floor-20261013-upright",
+    "camera_pose_confirmed": true,
+    "room": null,
+    "surface": "wooden floor observed",
+    "camera_rotation_degrees": 180,
+    "camera_reference": "data/observations/floor-upright.jpg",
+    "robot_width_mm": null,
+    "robot_length_mm": null,
+    "blind_spots": "rear, sides, area immediately under camera",
+    "status": "approved bounded floor experiment; travel uncalibrated",
+    "camera_pose_evidence": "User specified fixed forward-facing camera; upright floor view observed after software 180 degree correction; human requested two-second floor trial."
+  },
+  "valid_forward_calibration": false
+}

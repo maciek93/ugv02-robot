@@ -1,0 +1,20 @@
+{
+  "floor": {
+    "repository": "nvidia/segformer-b0-finetuned-ade-512-512",
+    "revision": "489d5cd81a0b59fab9b7ea758d3548ebe99677da",
+    "sha256": "6ae39addd01de6b1b8bde2cf677d43a5cd733424b8d186de3f95d1c51fee23f9",
+    "assets": {
+      "segformer-b0/config.json": "209caa9091e4632f7c8883c11170cd08ad29af68b23c09590aa4a5befb1a2a7f",
+      "segformer-b0/preprocessor_config.json": "8039d1d210abaa7117ad78e58cdfd6141a2ec72c03dae891b3cd76737e422c6c",
+      "segformer-b0/model.safetensors": "6ae39addd01de6b1b8bde2cf677d43a5cd733424b8d186de3f95d1c51fee23f9"
+    }
+  },
+  "depth": {
+    "path": "depth-v2/DepthAnythingV2SmallF16.mlpackage",
+    "sha256": "89fd5b2e5bb2ef0d0bc9e205ceeec93c518071bb9e3e76bbcdb811d43c898c3e"
+  },
+  "detector": {
+    "path": "yolo26n.pt",
+    "sha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef"
+  }
+}

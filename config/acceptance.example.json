@@ -1,0 +1,42 @@
+{
+  "trials": [],
+  "camera_loss": {
+    "passed": false,
+    "evidence": "",
+    "measured_stop_m": null,
+    "envelope_m": null
+  },
+  "network_loss": {
+    "passed": false,
+    "evidence": "",
+    "measured_stop_m": null,
+    "envelope_m": null
+  },
+  "viewer_loss": {
+    "passed": false,
+    "evidence": "",
+    "measured_stop_m": null,
+    "envelope_m": null
+  },
+  "obstacle_stop": {
+    "passed": false,
+    "evidence": "",
+    "measured_stop_m": null,
+    "envelope_m": null
+  },
+  "esp32_command_loss": {
+    "passed": false,
+    "evidence": "",
+    "measured_timeout_s": null,
+    "verified_upper_timeout_s": null
+  },
+  "shutdown": {
+    "passed": false,
+    "evidence": ""
+  },
+  "restart_disarmed": {
+    "passed": false,
+    "evidence": ""
+  },
+  "surveys": []
+}

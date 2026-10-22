@@ -1,0 +1,9 @@
+{
+  "configuration_id": "REPLACE_WITH_VALIDATED_CONFIGURATION",
+  "rooms": ["room-a", "room-b"],
+  "doorways": [{"id": "a-to-b", "from_room": "room-a", "to_room": "room-b"}],
+  "start_room": "room-a",
+  "starting_clearance_m": 0,
+  "duration_s": 600,
+  "travel_m": 10
+}

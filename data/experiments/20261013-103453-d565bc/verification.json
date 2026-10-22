@@ -1,0 +1,7 @@
+{
+  "test": "web_stop_cancels_pending_travel",
+  "motor_budget_s": 1.0,
+  "max_spent_s": 0.5,
+  "cancelled_before_complete": true,
+  "replay_status": 423
+}

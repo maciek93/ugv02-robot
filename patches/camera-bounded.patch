@@ -1,0 +1,480 @@
+diff --git a/app.py b/app.py
+index bec80ba..9f1fcd9 100644
+--- a/app.py
++++ b/app.py
+@@ -1,5 +1,5 @@
+ # import base_ctrl library
+-from base_ctrl import BaseController
++from bounded_ctrl import BaseController
+ import threading
+ import yaml, os
+ 
+@@ -36,7 +36,7 @@ base.base_oled(3, "Starting...")
+ from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, send_from_directory, send_file
+ from flask_socketio import SocketIO, emit
+ from werkzeug.utils import secure_filename
+-from aiortc import RTCPeerConnection, RTCSessionDescription
++# WebRTC disabled; the installed UI uses MJPEG /video_feed.
+ import json
+ import uuid
+ import asyncio
+@@ -55,7 +55,7 @@ si = os_info.SystemInfo()
+ app = Flask(__name__)
+ # log = logging.getLogger('werkzeug')
+ # log.disabled = True
+-socketio = SocketIO(app)
++socketio = SocketIO(app, async_mode='threading')
+ 
+ # Set to keep track of RTCPeerConnection instances
+ active_pcs = {}
+@@ -68,6 +68,9 @@ pcs = set()
+ 
+ # Camera funcs
+ cvf = cv_ctrl.OpencvFuncs(thisPath, base)
++from camera_stream import CameraStream
++camera_stream = CameraStream(cvf.frame_process, on_failure=lambda: base.guard.stop('camera failure'))
++base.observation_ok = lambda: camera_stream.snapshot() is not None
+ 
+ cmd_actions = {
+     f['code']['zoom_x1']: lambda: cvf.scale_ctrl(1),
+@@ -131,19 +134,118 @@ def process_cv_info(cmd):
+ 
+ # Function to generate video frames from the camera
+ def generate_frames():
+-    while True:
+-        frame = cvf.frame_process()
+-        # print(cvf.cv_info())
++    yield from camera_stream.frames()
++
++@app.route('/snapshot.jpg')
++def snapshot():
++    frame = camera_stream.snapshot()
++    if frame is None:
++        return jsonify(error='Fresh camera observation unavailable'), 503
++    return Response(frame, mimetype='image/jpeg', headers={'Cache-Control': 'no-store'})
++
++@app.route('/health')
++def health():
++    ready = camera_stream.snapshot() is not None
++    status = base.status()
++    status.update(camera_ready=ready, mode='supervised-bench', server_time_ms=time.time()*1000)
++    return jsonify(status), 200 if ready and status['controller_connected'] else 503
++
++
++# Available only over local SSH: LAN clients cannot issue movement here.
++@app.route('/api/drive', methods=['POST'])
++def guarded_drive():
++    if request.remote_addr not in ('127.0.0.1', '::1'):
++        return jsonify(error='Control requires local SSH access'), 403
++    data = request.get_json(silent=True)
++    if not isinstance(data, dict) or set(data) != {'left', 'right', 'duration', 'owner'}:
++        return jsonify(error='Expected left, right, duration, owner'), 400
++    try:
++        result = base.guard.drive(data['left'], data['right'], data['duration'], data['owner'])
++        return jsonify(result)
++    except ValueError as exc:
++        return jsonify(error=str(exc)), 400
++    except PermissionError as exc:
++        return jsonify(error=str(exc)), 423
++    except Exception:
++        logging.exception('Guarded drive transport failure')
++        return jsonify(error='Motor transport failed; Stop attempted'), 503
++
++@app.route('/api/stop', methods=['POST'])
++def guarded_stop():
++    if request.remote_addr not in ('127.0.0.1', '::1'):
++        return jsonify(error='Control requires local SSH access'), 403
++    try:
++        base.guard.stop('explicit API stop')
++        return jsonify(base.guard.status())
++    except Exception:
++        logging.exception('Stop transport failure')
++        return jsonify(error='Stop transport failed'), 503
++
++
++
++manual_sessions = {}
++manual_lock = threading.RLock()
++
++@app.route('/manual')
++def manual_page():
++    if request.remote_addr not in ('127.0.0.1', '::1'):
++        return jsonify(error='Manual control requires an SSH tunnel from the Mac'), 403
++    return render_template('manual.html')
++
++@socketio.on('connect', namespace='/manual')
++def manual_connect(auth=None):
++    if request.remote_addr not in ('127.0.0.1', '::1'):
++        return False
++    with manual_lock:
++        manual_sessions[request.sid] = 0
++
++def manual_sequence(data, keys):
++    if request.remote_addr not in ('127.0.0.1', '::1'):
++        raise PermissionError('Manual control requires local SSH access')
++    if not isinstance(data, dict) or set(data) != keys:
++        raise ValueError('Invalid manual command fields')
++    if data['connection'] != request.sid:
++        raise ValueError('Command belongs to a previous connection')
++    sequence = data['seq']
++    if type(sequence) is not int or sequence <= manual_sessions.get(request.sid, float('inf')):
++        raise ValueError('Stale or disconnected controller command')
++    manual_sessions[request.sid] = sequence
++
++@socketio.on('drive', namespace='/manual')
++def manual_drive(data):
++    with manual_lock:
+         try:
+-            yield (b'--frame\r\n'
+-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n') 
+-        except Exception as e:
+-            print("An [generate_frames] error occurred:", e)
+-
+-
+-
+-
+-
++            manual_sequence(data, {'left', 'right', 'duration', 'seq', 'connection', 'sent_at_ms'})
++            duration, sent = data['duration'], data['sent_at_ms']
++            if type(duration) not in (int, float) or not 0.05 <= duration <= 0.35:
++                raise ValueError('Invalid command duration')
++            if type(sent) not in (int, float):
++                raise ValueError('Invalid command timestamp')
++            age = time.time() - sent/1000
++            if not 0 <= age <= duration - 0.05:
++                raise ValueError('Expired movement request or invalid clock')
++            return {'ok': True, **base.guard.drive(data['left'], data['right'], duration-age, request.sid)}
++        except (ValueError, PermissionError) as exc:
++            return {'ok': False, 'error': str(exc)}
++        except Exception:
++            logging.exception('Manual motor transport failed')
++            return {'ok': False, 'error': 'Motor transport failed; Stop attempted'}
++
++@socketio.on('stop', namespace='/manual')
++def manual_stop(data):
++    with manual_lock:
++        try:
++            manual_sequence(data, {'seq', 'connection'})
++            base.guard.stop('manual Stop')
++            return {'ok': True, **base.guard.status()}
++        except Exception as exc:
++            return {'ok': False, 'error': str(exc)}
++
++@socketio.on('disconnect', namespace='/manual')
++def manual_disconnect(reason=None):
++    with manual_lock:
++        manual_sessions.pop(request.sid, None)
++        base.guard.disconnect(request.sid)
+ 
+ # Route to render the HTML template
+ @app.route('/')
+@@ -420,7 +522,7 @@ def cmdline_ctrl(args_string):
+ # Route to handle the offer request
+ @app.route('/offer', methods=['POST'])
+ def offer_route():
+-    return offer()
++    return jsonify(error='WebRTC unavailable; use MJPEG video'), 501
+ 
+ # Route to stream video frames
+ @app.route('/video_feed')
+@@ -429,6 +531,7 @@ def video_feed():
+ 
+ @app.route('/send_command', methods=['POST'])
+ def handle_command():
++    return jsonify(error='Motion disabled; waiting for supervised bench test'), 423
+     command = request.form['command']
+     print("Received command:", command)
+     cvf.info_update("CMD:" + command, (0,255,255), 0.36)
+@@ -477,7 +580,7 @@ def serve_static_settings(filename):
+ @socketio.on('json', namespace='/json')
+ def handle_socket_json(json):
+     try:
+-        base.base_json_ctrl(json)
++        return {'ok': False, 'error': 'Motion disabled; waiting for supervised bench test'}
+     except Exception as e:
+         print("Error handling JSON data:", e)
+         return
+@@ -499,7 +602,7 @@ def update_data_websocket_single():
+             f['fb']['detect_react']:cvf.detection_reaction_mode,
+             f['fb']['pan_angle']:   cvf.pan_angle,
+             f['fb']['tilt_angle']:  cvf.tilt_angle,
+-            f['fb']['base_voltage']:base.base_data['v'],
++            f['fb']['base_voltage']:base.voltage_raw(),
+             f['fb']['video_fps']:   cvf.video_fps,
+             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
+             f['fb']['base_light']:  base.base_light_status
+@@ -559,6 +662,8 @@ def handle_socket_cmd(message):
+         return
+     cmd_a = float(json_data.get("A", 0))
+     if cmd_a in cmd_actions:
++        if cmd_a in [f['code']['mc_unlo'], f['code']['cv_auto'], f['code']['mp_hand'], f['code']['mp_face'], f['code']['mp_pose']]:
++            return {'ok': False, 'error': 'Feature disabled during stationary camera setup'}
+         cmd_actions[cmd_a]()
+     else:
+         pass
+@@ -596,11 +701,7 @@ if __name__ == "__main__":
+     # update the size of videos and pictures
+     si.update_folder(thisPath)
+ 
+-    # pt/arm looks forward
+-    if f['base_config']['module_type'] == 1:
+-        base.base_json_ctrl({"T":f['cmd_config']['cmd_arm_ctrl_ui'],"E":f['args_config']['arm_default_e'],"Z":f['args_config']['arm_default_z'],"R":f['args_config']['arm_default_r']})
+-    else:
+-        base.gimbal_ctrl(0, 0, 200, 10)
++    # No arm or pan/tilt installed; no peripheral startup commands.
+ 
+     # feedback loop starts
+     si.start()
+@@ -614,7 +715,7 @@ if __name__ == "__main__":
+ 
+     # lights off
+     base.lights_ctrl(0, 0)
+-    cmd_on_boot()
++    print("GUARDED BENCH: motion disarmed by default; local finite command API only", flush=True)
+ 
+     # run the main web app
+     socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+diff --git a/audio_ctrl.py b/audio_ctrl.py
+index a91f2f0..1a7f118 100644
+--- a/audio_ctrl.py
++++ b/audio_ctrl.py
+@@ -27,8 +27,13 @@ except:
+ play_audio_event = threading.Event()
+ min_time_bewteen_play = config['audio_config']['min_time_bewteen_play']
+ 
+-engine = pyttsx3.init()
+-engine.setProperty('rate', config['audio_config']['speed_rate'])
++engine = None
++if usb_connected:
++    try:
++        engine = pyttsx3.init()
++        engine.setProperty('rate', config['audio_config']['speed_rate'])
++    except Exception as exc:
++        print(f'Optional speech unavailable: {exc}')
+ 
+ 
+ def play_audio(input_audio_file):
+@@ -100,7 +105,7 @@ def set_min_time_between(input_time):
+ 
+ 
+ def play_speech(input_text):
+-	if not usb_connected:
++	if not usb_connected or engine is None:
+ 		return
+ 	engine.say(input_text)
+ 	engine.runAndWait()
+diff --git a/cv_ctrl.py b/cv_ctrl.py
+index 1fa709b..17cc901 100644
+--- a/cv_ctrl.py
++++ b/cv_ctrl.py
+@@ -1,6 +1,6 @@
+ import cv2
+ import imutils
+-import mediapipe as mp
++mp = None  # Optional MediaPipe is not installed for USB camera/manual setup.
+ import imageio
+ import threading
+ import datetime, time
+@@ -11,12 +11,10 @@ from collections import deque
+ import textwrap
+ 
+ # libraries for csi camera
+-from picamera2 import Picamera2
+-from picamera2.encoders import H264Encoder, Encoder
+-from picamera2.outputs import FfmpegOutput
++# CSI camera support deferred; installed camera is USB/UVC.
+ 
+ # libraries for oak camera
+-import depthai as dai
++# OAK camera support deferred; no OAK device installed.
+ 
+ # config file.
+ curpath = os.path.realpath(__file__)
+@@ -94,39 +92,7 @@ class OpencvFuncs():
+                             "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
+                             "sofa", "train", "tvmonitor"]
+ 
+-        # mediapipe
+-        self.mpDraw = mp.solutions.drawing_utils
+-
+-        # mediapipe detect hand
+-        self.mpHands = mp.solutions.hands
+-        self.hands = self.mpHands.Hands(max_num_hands=1)
+-        self.max_distance = 1
+-        self.gs_pic_interval = 6
+-        self.gs_pic_last_time = time.time()
+-
+-        # findline autodrive
+-        self.sampling_line_1 = 0.6
+-        self.sampling_line_2 = 0.9
+-        self.slope_impact = 1.5
+-        self.base_impact = 0.005
+-        self.speed_impact = 0.5
+-        self.line_track_speed = 0.3
+-        self.slope_on_speed = 0.1
+-        self.line_lower = np.array([25, 150, 70])
+-        self.line_upper = np.array([42, 255, 255])
+-
+-        # mediapipe detect faces
+-        self.mp_face_detection = mp.solutions.face_detection
+-        self.face_detection = self.mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+-
+-        # mediapipe detect pose
+-        self.mp_pose = mp.solutions.pose
+-        self.pose = self.mp_pose.Pose(static_image_mode=False, 
+-                                    model_complexity=1, 
+-                                    smooth_landmarks=True, 
+-                                    min_detection_confidence=0.5, 
+-                                    min_tracking_confidence=0.5)
+-
++        # Optional MediaPipe and autonomous line driving are deferred.
+         # base data
+         self.show_base_info_flag = False
+         self.recv_deque = deque(maxlen=20)
+@@ -153,44 +119,15 @@ class OpencvFuncs():
+ 
+         # usb camera init
+         if self.usb_camera_connected:
+-            self.camera = cv2.VideoCapture(0)
++            self.camera = cv2.VideoCapture(os.environ.get('UGV_CAMERA_DEVICE', '/dev/v4l/by-id/usb-USB_USB-video-index0'), cv2.CAP_V4L2)
++            self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
++            self.camera.set(cv2.CAP_PROP_FPS, 30)
++            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
+             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+ 
+-        # csi camera init
+         if not self.usb_camera_connected:
+-            print("init csi camera.")
+-            try:
+-                self.encoder = H264Encoder(1000000)
+-                self.picam2 = Picamera2()
+-                self.picam2.configure(self.picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (f['video']['default_res_w'], f['video']['default_res_h'])}))
+-                self.picam2.start()
+-                self.csi_camera_connected = True
+-            except:
+-                self.csi_camera_connected = False
+-
+-        #oak camera init 
+-        if not self.usb_camera_connected and not self.csi_camera_connected:
+-            try:
+-                self.pipeline = dai.Pipeline()
+-
+-                self.camRgb = self.pipeline.createColorCamera()
+-                self.camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
+-                self.camRgb.setInterleaved(False)
+-                # self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_480_P)
+-                self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_720_P)
+-
+-                self.xout = self.pipeline.createXLinkOut()
+-                self.xout.setStreamName("video")
+-                self.camRgb.video.link(self.xout.input)
+-
+-                self.device = dai.Device(self.pipeline)
+-                self.output_queue = self.device.getOutputQueue(name="video", maxSize=8, blocking=False)
+-
+-                self.oak_camera_connected = True
+-            except Exception as e:
+-                print(f"[cv_ctrl.frame_process] error: {e}")
+-                self.oak_camera_connected = False
++            raise RuntimeError('Configured USB camera is unavailable')
+ 
+ 
+     def frame_process(self):
+@@ -200,7 +137,8 @@ class OpencvFuncs():
+                 if not success:
+                     self.camera.release()
+                     time.sleep(1)
+-                    self.camera = cv2.VideoCapture(0)
++                    raise RuntimeError('USB camera read failed; reopen the stream after checking camera')
++                    self.camera = cv2.VideoCapture(os.environ.get('UGV_CAMERA_DEVICE', '/dev/v4l/by-id/usb-USB_USB-video-index0'), cv2.CAP_V4L2)
+             elif self.csi_camera_connected:
+                 input_frame = self.picam2.capture_array()
+             elif self.oak_camera_connected:
+@@ -215,15 +153,8 @@ class OpencvFuncs():
+                 input_frame = buffer.tobytes()
+                 time.sleep(1)
+                 return input_frame
+-        except Exception as e:
+-            print(f"[cv_ctrl.frame_process] error: {e}")
+-            input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+-            cv2.putText(input_frame, f"camera read failed... \n{e}", 
+-                        (round(0.05*640), round(0.1*640 + 5 * 13)), 
+-                        cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
+-            ret, buffer = cv2.imencode('.jpg', input_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.video_quality])
+-            input_frame = buffer.tobytes()
+-            return input_frame
++        except Exception:
++            raise
+ 
+         # opencv funcs
+         if self.cv_mode != f['code']['cv_none']:
+@@ -319,13 +250,9 @@ class OpencvFuncs():
+ 
+ 
+     def usb_camera_detection(self):
+-        lsusb_output = subprocess.check_output(["lsusb"]).decode("utf-8")
+-        if "Camera" in lsusb_output:
+-            print("USB Camera connected")
+-            return True
+-        else:
+-            print("USB Camera not connected")
+-            return False
++        device = os.environ.get('UGV_CAMERA_DEVICE', '/dev/v4l/by-id/usb-USB_USB-video-index0')
++        return os.path.exists(device)
++
+ 
+ 
+     def osd_render(self, osd_frame):
+diff --git a/templates/control.js b/templates/control.js
+index 90561da..654f11a 100644
+--- a/templates/control.js
++++ b/templates/control.js
+@@ -703,7 +703,7 @@ socket.on('update', function(data) {
+         document.getElementById("photos-size").innerHTML = data[picture_size] + " MB";
+         document.getElementById("videos-size").innerHTML = data[video_size] + " MB";
+ 
+-        document.getElementById("v_in").innerHTML = (data[base_voltage]/100).toFixed(1);
++        document.getElementById("v_in").innerHTML = data[base_voltage] == null ? 'unknown' : (data[base_voltage]/100).toFixed(1);
+         
+         var element = document.getElementById("b_state");
+         element.classList.remove("baterry_state", "baterry_state1", "baterry_state2", "baterry_state3");
+diff --git a/templates/index.html b/templates/index.html
+index 179837a..2bbea08 100644
+--- a/templates/index.html
++++ b/templates/index.html
+@@ -10,7 +10,7 @@
+     <style type="text/css">
+     </style>
+   </head>
+-<body>
++<body><div style="background:#5b1c1c;color:white;padding:12px;text-align:center">Camera and telemetry. Guarded bench test via SSH only; web driving disabled.</div>
+     <main>
+         <div class="box1">
+             <section class="section_video box_outline">
+@@ -32,7 +32,7 @@
+                                     </div>
+                                     <div class="feed feed_r_t">
+                                         <div>
+-                                            <div class="feed_ico_baterry"><span id="b_state" class="baterry_state baterry_state1"></span><span id="v_in">12</span><span> V</span></div>
++                                            <div class="feed_ico_baterry"><span id="b_state" class="baterry_state baterry_state1"></span><span id="v_in">unknown</span><span> V</span></div>
+                                             <div class="feed_ico_light"><span class="light_state"></span><span id="MODE">AUTO</span></div>
+                                             <p><span>RSSI: </span><span id="rssi">0</span></p>
+                                             <p><span>FPS: </span><span id="fps">0</span></p>
+@@ -93,7 +93,7 @@
+                         <div class="views">
+                             <div><button class="normal_btn normal_btn_size video_btn_zoom btn_ico" id="zoom_btn"></button></div>
+                             <div class="video_btn_px_select">
+-                                <button id="video_pixel_btn" class="normal_btn normal_btn_size video_btn_px">WebRTC</button>
++                                <button id="video_pixel_btn" class="normal_btn normal_btn_size video_btn_px">MJPEG</button>
+                                 <ul id="video_pixel_btn_list">
+                                     <!-- <li class="normal_btn" onclick="cmdSend(max_res,2,0);">960P</li>
+                                     <li class="normal_btn" onclick="cmdSend(mid_res,1,0);">480P</li>
+@@ -326,6 +326,6 @@
+     </footer>
+     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
+     <script src="./control.js"></script>
+-    <script src="./main.js"></script>
++    <!-- MJPEG is the supported video transport for this stage. -->
+ </body>
+ </html>

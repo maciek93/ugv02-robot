@@ -1,0 +1,14 @@
+{
+  "status": "observation-only",
+  "configuration_id": "kitchen-manual-observation-20261022",
+  "length_m": 0.25,
+  "width_m": 0.23,
+  "track_m": 0.41,
+  "lidar_x_m": 0.08,
+  "lidar_y_m": 0.0,
+  "lidar_yaw_rad": -1.497,
+  "encoder_m_per_unit": 0.009634,
+  "encoder_signs": [-1, -1],
+  "upper_speed_m_s": 0.25,
+  "evidence": "Human-measured chassis and LiDAR position; four wall-aligned LD06 scans; two 3-second PWM50 forward legs each gave 41 encoder units and approximately 0.397/0.393 m by scan alignment; turns showed effective track about 0.39-0.45 m. This profile feeds odometry to observational SLAM only and cannot authorise navigation."
+}

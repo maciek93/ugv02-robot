@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UGV02 manual control</title>
+<style>
+body{margin:0;background:#111827;color:#f3f4f6;font:16px system-ui,sans-serif}main{max-width:760px;margin:auto;padding:20px}h1{font-size:24px;margin:0 0 12px}.status{padding:12px;background:#273449;border-radius:8px;margin:12px 0}img{display:block;width:100%;background:#000;border-radius:8px}.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:440px;margin:20px auto}button{font:600 18px system-ui;padding:22px 10px;border:0;border-radius:8px;background:#385e96;color:white;touch-action:none;user-select:none}button:disabled{opacity:.35}button:active{background:#597fb8}.stop{background:#b42332}.small{color:#b9c5d6;font-size:14px;line-height:1.5}.notice{color:#ffd48a}#forward{grid-column:2}#left{grid-column:1}#reverse{grid-column:2}#right{grid-column:3}
+</style></head><body><main>
+<h1>UGV02 manual control</h1>
+<p class="notice">Supervised bench control. Keep the robot supported with the wheels clear.</p>
+<img src="/video_feed" alt="Live robot camera">
+<div class="status" id="status" role="status">Connecting…</div>
+<div class="controls">
+<button id="forward" data-left="0.08" data-right="0.08" disabled>Forward</button>
+<button id="left" data-left="-0.08" data-right="0.08" disabled>Left</button>
+<button id="stop" class="stop">STOP</button>
+<button id="right" data-left="0.08" data-right="-0.08" disabled>Right</button>
+<button id="reverse" data-left="-0.08" data-right="-0.08" disabled>Reverse</button>
+</div>
+<p class="small">Hold a direction button to turn the wheels at a requested 0.08 m/s. Release to stop. The Pi also stops if commands stop arriving or camera/chassis feedback is lost. This page cannot arm motion; each supervised session must be enabled through SSH. Floor driving and autonomous roaming are pending.</p>
+<p id="message" class="small" role="status"></p>
+<script src="/socket.io.js"></script>
+<script>
+const socket = io('/manual');
+let timer = null, command = null, seq = 0, currentHealth = null;
+const directions = [...document.querySelectorAll('[data-left]')];
+function available(){return socket.connected && currentHealth?.motion_enabled && currentHealth?.camera_ready && currentHealth?.controller_connected;}
+function render(){
+  directions.forEach(b => b.disabled = !available());
+  const h = currentHealth;
+  document.getElementById('status').textContent = h ? `${available() ? 'Bench control armed' : 'Motion disarmed'} · Battery ${h.battery_voltage_v == null ? 'unknown' : h.battery_voltage_v.toFixed(2)+' V'} · Camera ${h.camera_ready ? 'live' : 'unavailable'} · Controller ${h.controller_connected ? 'connected' : 'unavailable'}` : 'Connection unavailable';
+}
+function stop(force=false){
+  const hadCommand = command !== null || timer !== null;
+  if(timer !== null) clearInterval(timer);
+  timer = null; command = null;
+  if(socket.connected && (hadCommand || force)) socket.emit('stop', {seq:++seq,connection:socket.id}, reply => {if(!reply?.ok) document.getElementById('message').textContent = reply?.error || 'Stop acknowledgment unavailable';});
+}
+function send(){
+  if(!command || !available()){stop(); return;}
+  socket.emit('drive', {...command,duration:0.30,seq:++seq,connection:socket.id,sent_at_ms:Date.now()+clockOffset}, reply => {
+    if(!reply?.ok){document.getElementById('message').textContent = reply?.error || 'Command rejected';stop();}
+  });
+}
+directions.forEach(button => {
+  button.addEventListener('pointerdown', e => {
+    if(!available()) return;
+    e.preventDefault();button.setPointerCapture(e.pointerId);stop();
+    command = {left:Number(button.dataset.left),right:Number(button.dataset.right)};
+    document.getElementById('message').textContent='';send();timer=setInterval(send,100);
+  });
+  button.addEventListener('pointerup',()=>stop());
+  button.addEventListener('pointercancel',()=>stop());
+  button.addEventListener('lostpointercapture',()=>stop());
+});
+document.getElementById('stop').addEventListener('pointerdown',()=>stop(true));
+window.addEventListener('blur',()=>stop());
+window.addEventListener('pagehide',()=>stop());
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+socket.on('disconnect',()=>{stop();render();});
+socket.on('connect',()=>{seq=0;render();});
+socket.on('connect_error',()=>{stop();render();});
+let clockOffset=0;
+async function poll(){
+  try{
+    const response=await fetch('/health',{cache:'no-store'});
+    currentHealth=await response.json();
+    clockOffset=currentHealth.server_time_ms-Date.now();
+    if(!response.ok || !available())stop();
+  }catch(e){currentHealth=null;stop();}
+  render();
+}
+poll();setInterval(poll,500);
+</script></main></body></html>

@@ -1,0 +1,8 @@
+{
+  "state": "paused",
+  "moving": false,
+  "camera": {
+    "error": "Camera is off"
+  },
+  "local_vision": null
+}

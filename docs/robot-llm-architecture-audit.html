@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Architecture Audit & Engineering Roadmap: LLM-Driven Autonomous Robot Navigation</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #202124;
+    max-width: 860px;
+    margin: 40px auto;
+    padding: 0 20px;
+  }
+  h1 { color: #1a73e8; font-size: 26pt; border-bottom: 2px solid #e8eaed; padding-bottom: 12px; margin-bottom: 16px; }
+  h2 { color: #202124; font-size: 18pt; border-bottom: 1px solid #e8eaed; padding-bottom: 8px; margin-top: 32px; }
+  h3 { color: #3c4043; font-size: 14pt; margin-top: 24px; }
+  p, li { font-size: 11pt; color: #3c4043; }
+  code {
+    background-color: #f1f3f4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 10pt;
+    color: #d93025;
+  }
+  pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    padding: 14px;
+    overflow-x: auto;
+  }
+  pre code {
+    background-color: transparent;
+    padding: 0;
+    color: #202124;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+  }
+  th, td {
+    border: 1px solid #dadce0;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 10.5pt;
+  }
+  th {
+    background-color: #f1f3f4;
+    color: #202124;
+    font-weight: 600;
+  }
+  tr:nth-child(even) { background-color: #fafbfc; }
+  .callout {
+    background-color: #e8f0fe;
+    border-left: 4px solid #1a73e8;
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 18px 0;
+  }
+  .warning {
+    background-color: #fef7e0;
+    border-left: 4px solid #f9ab00;
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 18px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Architecture Audit & Engineering Roadmap:<br>LLM-Driven Autonomous Robot Navigation</h1>
+
+<div class="callout">
+  <strong>Target Hardware:</strong> Waveshare UGV02 tracked chassis, Raspberry Pi 5 (SBC), ESP32 chassis controller, USB/UVC monocular camera (640x480), Apple Silicon Mac (M5, 32 GB RAM).<br>
+  <strong>Objective:</strong> Enable high-level natural language driving commands via an LLM (<em>"Drive to the kitchen, then approach the blue armchair"</em>) on a single floor, despite monocular camera constraints and non-real-time LLM inference.
+</div>
+
+<h2>1. Executive Summary & Current State</h2>
+<p>The repository contains a safety-first mobile robot architecture:</p>
+<ul>
+  <li><strong>Raspberry Pi 5 (<code>ugv-supervised</code>)</strong>: Implements strict real-time safety, motor leases capped at &le; 250 ms, a 100 ms renewal deadline, and an independent hardware watchdog (<code>guardian.py</code>).</li>
+  <li><strong>Mac Host</strong>: Runs heavy perception and mission coordination (<code>mac.py</code>, <code>vision.py</code>). It executes three models concurrently (SegFormer-B0 floor segmentation, CoreML Depth Anything V2 Small, and YOLO26n) in <strong>58 ms warm median latency</strong> (~16 Hz).</li>
+  <li><strong>Test Suite</strong>: 59 automated unit and regression tests pass across control policies, geometry checks, and watchdog boundaries.</li>
+</ul>
+
+<div class="warning">
+  <strong>The Core Architectural Mismatch:</strong><br>
+  The current system was built as a human-in-the-loop bench/calibration testbed. It breaks navigation down into discrete 10 cm, 25 cm, 50 cm straight segments and 15&deg; turns (<code>scripts/mission.py candidates</code> / <code>select</code>).<br><br>
+  Requiring an LLM or human operator to select candidates every 25 cm over a 10-meter hallway requires <strong>30 to 40 sequential round-trips</strong>. Because LLMs have inherent network and reasoning latency (1–5 s), asking an LLM to act as a micro-step path planner is slow, brittle, and incapable of closed-loop target approach.
+</div>
+
+<p>To achieve your goal, the system must shift to <strong>Hierarchical 3-Tier Autonomy</strong>:</p>
+<ol>
+  <li><strong>High-Level Agent (LLM)</strong>: Semantic reasoning & mission-level orchestration (0.1–0.5 Hz).</li>
+  <li><strong>Mid-Level Autonomy (Mac M5)</strong>: Semantic scene understanding, topological graph navigation, continuous corridor path planning, and visual servoing (5–15 Hz).</li>
+  <li><strong>Low-Level Reflexes (Pi 5 + ESP32)</strong>: Hard real-time lease enforcement, motor safety watchdog, and IMU/odometry feedback (20–50 Hz).</li>
+</ol>
+
+<h2>2. In-Depth Technical Audit</h2>
+
+<h3>A. Root-Cause Analysis: Physical Motion Stalling (Trials 1 & 2)</h3>
+<p>Records in <code>data/progress.json</code> and <code>data/experiments/20261013-150507-15f6de/trial.json</code> reveal an unresolved motion failure:</p>
+<ul>
+  <li><strong>Trial 1:</strong> Commanded forward for 2.0 s &rarr; moved backwards &approx; 125 mm.</li>
+  <li><strong>Trial 2:</strong> Direction polarity updated to <code>[-1, -1]</code>. Motors commanded for 2.0 s &rarr; human reported <strong>no physical movement</strong>, yet encoders reported &minus;11 / &minus;8 cm.</li>
+</ul>
+
+<h4>Root Causes Identified in Code:</h4>
+<ol>
+  <li><strong>Track Static Friction vs. 0.05 m/s Crawl Speed:</strong>
+    <ul>
+      <li>The UGV02 is a heavy metal chassis with rubber tracks.</li>
+      <li>Speed is hardcoded to 0.05 m/s (5 cm/s) in <code>supervised/policy.py</code>.</li>
+      <li>In firmware (<code>vendor/ugv_base_ros/ROS_Driver/movtion_module.h:294</code>), motor PWM below <code>THRESHOLD_PWM = 23</code> (out of 255) is suppressed to 0:
+        <pre><code>outputA = pidA.Run(speedGetA);
+if (abs(outputA) &lt; THRESHOLD_PWM) {
+  outputA = 0;
+}</code></pre>
+      </li>
+      <li>At 0.05 m/s, the PID output oscillates around or below this deadband threshold. Static track friction prevents the robot from breaking away, while motor gearbox backlash and vibration cause the optical encoders to tick slightly.</li>
+    </ul>
+  </li>
+  <li><strong>Quantized Telemetry (Integer Centimeters):</strong>
+    <ul>
+      <li>In <code>vendor/ugv_base_ros/ROS_Driver/ugv_advance.h:410</code>:
+        <pre><code>long int odl_cm = (en_odom_l * 100);
+jsonInfoHttp["odl"] = odl_cm;</code></pre>
+      </li>
+      <li>At 5 cm/s for a 250 ms lease, expected travel is only 1.25 cm.</li>
+      <li>Integer truncation (1.25 cm &rarr; 1 cm) introduces massive quantization noise, frequently tripping <code>FloorTracker</code>'s strict visual vs. encoder threshold (<code>max_translation_disagreement_m = 0.03</code>).</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>B. The Monocular Camera Challenge (No Depth Sensor)</h3>
+<ol>
+  <li><strong>Pitch Sensitivity in Inverse Perspective Mapping (IPM):</strong>
+    <code>supervised/navigation.py</code> uses a static homography matrix (<code>image_to_ground</code>) to project floor pixels into metric world coordinates. This assumes zero pitch and roll. In physical driving, motor torque and carpet transitions cause 1&deg;–3&deg; pitch variations. At 2 meters, a 2&deg; pitch tilt shifts perceived ground coordinates by 50–100 cm. <code>FloorTracker</code> detects this scale shift and immediately trips <code>ValueError('Camera pitch, scale or floor changed')</code>, locking the mission.
+  </li>
+  <li><strong>Relative Depth vs. Metric Range:</strong>
+    CoreML <code>DepthAnythingV2Small</code> outputs affine-invariant relative disparity. The codebase condenses this into a single scalar center-ROI <code>near_score</code>. While effective as a binary collision veto for massive obstacles, it cannot estimate metric distance to chair legs or walls.
+  </li>
+</ol>
+
+<h3>C. Missing Semantic Stack</h3>
+<ul>
+  <li><strong>No Furniture Perception:</strong> YOLO26n only outputs <code>person</code> and <code>pet</code> as safety vetoes. It has no bounding boxes for <code>chair</code>, <code>table</code>, <code>door</code>, or <code>couch</code>.</li>
+  <li><strong>Fragile Place Recognition:</strong> ORB feature matching in <code>revisit_candidates</code> is viewpoint-dependent and easily invalidated by lighting changes or approaching from a different heading.</li>
+</ul>
+
+<h2>3. Recommended Architectural Solutions</h2>
+
+<h3>A. Single-Camera 3D Perception Without a Depth Sensor</h3>
+<ol>
+  <li><strong>Ground-Contact Homography (Metric Object Localization):</strong>
+    On a single flat floor, all grounded furniture (chair legs, tables, door frames) intersects the ground plane.
+    <ul>
+      <li>Compute SegFormer floor segmentation mask.</li>
+      <li>Detect the target object bounding box.</li>
+      <li>The lowest bounding box edge touching the segmented floor defines the physical ground contact point.</li>
+      <li>Projecting that contact point through the homography $H_{img \to ground}$ yields the <strong>exact metric $(X, Y)$ ground position relative to the chassis</strong> without any LiDAR, stereo camera, or ToF sensor.</li>
+    </ul>
+  </li>
+  <li><strong>IMU-Compensated Dynamic Homography:</strong>
+    Read the ESP32 IMU pitch angle from incoming telemetry and adjust the camera pitch dynamically in the IPM projection. This eliminates false "floor changed" tracking faults during acceleration and braking.
+  </li>
+  <li><strong>Image-Based Visual Servoing (IBVS) for Target Approach:</strong>
+    Once the target object (e.g. <code>chair</code>) is detected, bypass metric map coordinates and engage visual servoing:
+    <ul>
+      <li><strong>Yaw Alignment:</strong> $\omega_z = -k_p (u_{bbox\_center} - u_{image\_center})$</li>
+      <li><strong>Forward Approach:</strong> $v_x = k_v (h_{target\_pixels} - h_{current\_pixels})$</li>
+    </ul>
+    The robot centers the chair in frame and drives forward until the bounding box height reaches a calibrated threshold (or contact point reaches 0.5 m), then halts smoothly.
+  </li>
+</ol>
+
+<h3>B. Upgrading Perception Models on Mac M5</h3>
+<ul>
+  <li><strong>Open-Vocabulary Object Detection:</strong> Replace YOLO26n with <strong>YOLO-World (v2-S or v2-M)</strong> running on Mac MPS. Latency: ~15 ms. Prompts dynamically for any text target: <code>["chair", "armchair", "doorway", "table", "person"]</code>.</li>
+  <li><strong>Topological Place Recognition:</strong> Replace ORB with <strong>MobileCLIP</strong> or <strong>CosPlace</strong> image embeddings (512-d vector). Checkpoints store semantic embeddings; dot-product similarity identifies current room location invariant to small perspective and illumination changes.</li>
+</ul>
+
+<h3>C. Low-Level Firmware & Transport Fixes</h3>
+<ul>
+  <li><strong>Overcome Static Friction:</strong> Raise nominal floor travel speed in <code>policy.py</code> from 0.05 m/s to 0.12–0.15 m/s (12–15 cm/s). Add a 50 ms breakaway torque pulse (0.20 m/s) when starting from a dead stop.</li>
+  <li><strong>Millimeter Odometry:</strong> Update ESP32 <code>ugv_advance.h</code> to transmit raw accumulated encoder pulses in telemetry instead of integer centimeters.</li>
+</ul>
+
+<h2>4. The LLM High-Level Interface</h2>
+<p>Expose <strong>macro-skills</strong> as structured tools to the LLM agent:</p>
+<pre><code>tools = [
+    {
+        "name": "navigate_to_room",
+        "description": "Navigate autonomously to a target room via the topological room graph.",
+        "parameters": {
+            "room_name": {"type": "string", "enum": ["kitchen", "living_room", "hallway", "office"]}
+        }
+    },
+    {
+        "name": "approach_object",
+        "description": "Locate an object in the current room and drive to within 0.5m using visual servoing.",
+        "parameters": {
+            "object_name": {"type": "string", "description": "e.g., 'chair', 'blue armchair', 'dining table'"}
+        }
+    },
+    {
+        "name": "scan_environment",
+        "description": "Perform a 360-degree in-place scan and return detected objects, doorways, and rooms."
+    },
+    {
+        "name": "emergency_stop",
+        "description": "Immediately cancel all active motor leases."
+    }
+]</code></pre>
+
+<h3>Execution Walkthrough</h3>
+<p><strong>User:</strong> <em>"Drive to the kitchen, then approach the chair."</em></p>
+<ol>
+  <li><strong>Step 1 (LLM Reasoning):</strong> Calls <code>navigate_to_room(room_name="kitchen")</code>.
+    <ul>
+      <li>Mac looks up path: <code>current_room</code> &rarr; <code>corridor</code> &rarr; <code>doorway_kitchen</code>.</li>
+      <li>Mac navigation worker continuously tracks floor corridor and issues renewable 250 ms leases.</li>
+      <li>Arrives at kitchen doorway, verifies room landmark embedding, stops, and returns: <code>{"status": "arrived", "room": "kitchen"}</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Step 2 (LLM Reasoning):</strong> Calls <code>approach_object(object_name="chair")</code>.
+    <ul>
+      <li>Mac sets YOLO-World target to <code>"chair"</code>.</li>
+      <li>If not immediately visible, rotates in-place until detection confidence &gt; 0.6.</li>
+      <li>Visual servoing locks onto bounding box, aligns heading, and drives forward until the chair base is 0.5 m ahead.</li>
+      <li>Stops motors and returns: <code>{"status": "reached", "target": "chair", "distance_m": 0.52}</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Step 3 (LLM Response to User):</strong> <em>"I have navigated to the kitchen and parked directly in front of the chair."</em></li>
+</ol>
+
+<h2>5. Phased Implementation Roadmap</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Phase</th>
+      <th>Milestone</th>
+      <th>Core Files</th>
+      <th>Deliverable</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Phase 1</strong></td>
+      <td><strong>Physical Motion & Deadband Calibration</strong></td>
+      <td><code>policy.py</code>, <code>guardian.py</code>, <code>transport.py</code></td>
+      <td>Overcome track friction; verify reliable forward/turn floor travel at 0.12 m/s.</td>
+    </tr>
+    <tr>
+      <td><strong>Phase 2</strong></td>
+      <td><strong>Dynamic IMU Homography & Contact Projection</strong></td>
+      <td><code>navigation.py</code>, <code>explore_vision.py</code></td>
+      <td>Real-time pitch compensation; metric (X,Y) calculation from object bottom edges.</td>
+    </tr>
+    <tr>
+      <td><strong>Phase 3</strong></td>
+      <td><strong>Open-Vocabulary Furniture Detection</strong></td>
+      <td><code>supplementary_vision.py</code>, <code>vision.py</code></td>
+      <td>Deploy YOLO-World on Mac MPS for zero-shot chair, door, and table detection (&lt;20 ms).</td>
+    </tr>
+    <tr>
+      <td><strong>Phase 4</strong></td>
+      <td><strong>Visual Servoing (Target Approach)</strong></td>
+      <td>New <code>supervised/servoing.py</code></td>
+      <td>Closed-loop visual pursuit toward detected objects, halting safely at 0.5 m.</td>
+    </tr>
+    <tr>
+      <td><strong>Phase 5</strong></td>
+      <td><strong>LLM Tool Interface & Room Graph</strong></td>
+      <td>New <code>scripts/llm_agent.py</code></td>
+      <td>High-level agent tool runner executing multi-room navigation and object approach from natural language.</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>

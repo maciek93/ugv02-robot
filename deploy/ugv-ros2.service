@@ -1,0 +1,14 @@
+[Unit]
+Description=UGV02 ROS 2 LiDAR mapping sidecar
+After=docker.service ugv-supervised.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/docker run --rm --name ugv-ros2 --network host --privileged -v /dev:/dev -v /home/ugvpi/.config/ugv-supervised:/etc/ugv-supervised:ro -v /home/ugvpi/robot-maps:/var/lib/ugv-maps ugv-ros2:jazzy
+ExecStop=/usr/bin/docker stop --time 2 ugv-ros2
+Restart=no
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

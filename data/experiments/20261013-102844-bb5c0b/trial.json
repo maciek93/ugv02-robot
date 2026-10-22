@@ -1,0 +1,11 @@
+{
+  "label": "bench-web-stop-coordinated",
+  "physical_context": "supported",
+  "approval": "Test the web STOP button during a test sequence. Confirm that it cancels the remaining pulses and requires a new approval before further movement.",
+  "action": "pulse_forward",
+  "value": 1.0,
+  "fault": null,
+  "started": "2026-10-13T10:28:44+0100",
+  "status": "failed",
+  "error": "Start an observation session first"
+}

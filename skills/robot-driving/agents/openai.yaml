@@ -1,0 +1,3 @@
+interface:
+  display_name: "Robot Driving"
+  short_description: "Drive and test the Mac/Pi UGV02 robot"

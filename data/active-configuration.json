@@ -1,0 +1,29 @@
+{
+  "configuration_id": "floor-20261013-upright-polarity-corrected",
+  "camera_pose_confirmed": true,
+  "room": null,
+  "surface": "wooden floor observed",
+  "camera_rotation_degrees": 180,
+  "camera_reference": "data/observations/floor-upright.jpg",
+  "robot_width_mm": 230,
+  "robot_length_mm": 250,
+  "blind_spots": "rear, sides, area immediately under camera",
+  "status": "approved bounded floor experiment; travel uncalibrated",
+  "camera_pose_evidence": "User specified fixed forward-facing camera; upright floor view observed after software 180 degree correction; human requested two-second floor trial.",
+  "motor_polarity": [
+    -1,
+    -1
+  ],
+  "direction_verified": true,
+  "direction_evidence": "14 October 2026: user observed physical forward movement, approximately 5 cm, during one 1-second corrected-polarity trial. A later 4-second trial moved an estimated 10\u201320 cm and veered left; turn mapping and straight tracking remain unverified.",
+  "lidar_centre_from_front_mm": {
+    "min": 40,
+    "max": 50
+  },
+  "lidar_x_from_chassis_centre_m": {
+    "min": 0.075,
+    "max": 0.085
+  },
+  "lidar_y_from_chassis_centre_m": 0,
+  "chassis_measurement_evidence": "Human supplied 22 October 2026; LiDAR centre roughly 4-5 cm behind front edge and centred left-right."
+}

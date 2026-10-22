@@ -1,0 +1,25 @@
+[Unit]
+Description=UGV02 session controller with independent motor watchdog
+After=network.target
+Conflicts=ugv-web.service
+
+[Service]
+Type=simple
+User=ugvpi
+Group=ugvpi
+SupplementaryGroups=video dialout
+WorkingDirectory=/home/ugvpi/ugv-supervised
+RuntimeDirectory=ugv-supervised
+RuntimeDirectoryMode=0700
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ugvpi/ugv_rpi/ugv-env/bin/python /home/ugvpi/ugv-supervised/guardian.py
+Restart=no
+TimeoutStopSec=5
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

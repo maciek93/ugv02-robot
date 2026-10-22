@@ -1,0 +1,64 @@
+{
+  "status": "candidate only; not a loadable profile and not installed",
+  "surface": "prior 14 October floor trials; current surface unconfirmed",
+  "known_single_trial_estimates": {
+    "forward_pwm": 50,
+    "forward_m_s_at_pwm": 0.164,
+    "turn_pwm": 80,
+    "turn_rad_s_at_pwm": 0.571,
+    "encoder_m_per_unit": 0.00965,
+    "encoder_signs": [
+      -1,
+      -1
+    ],
+    "motor_polarity": [
+      -1,
+      -1
+    ],
+    "track_m_inferred_from_right_turn": 0.407
+  },
+  "unmeasured_or_unverified": {
+    "left_turn_rate_rad_s": "one physically observed ~180 degree left turn in 5.5 s, repeatability pending",
+    "stopping_distance_m": null,
+    "esp32_command_loss_timeout_s": null,
+    "repeatability": null,
+    "vl53l5cx_zone_orientation": null,
+    "lidar_yaw_absolute_alignment_error": "unmeasured"
+  },
+  "wall_fit_note": "A live right-side wall fit suggested about +4.95 degrees, but chassis-wall alignment was not confirmed; this is not a mounting calibration.",
+  "source_evidence": [
+    "records/live-motion-20261014.md",
+    "records/metric-integration-20261022.md",
+    "data/experiments/20261022-120612-87f7c8/trial.json",
+    "data/experiments/20261022-120648-e6db40/trial.json",
+    "data/observations/ld06-front-wall-aligned-1-20261022.json",
+    "data/observations/ld06-front-wall-aligned-2-20261022.json",
+    "data/observations/ld06-front-wall-aligned-3-20261022.json",
+    "data/observations/ld06-front-wall-aligned-4-20261022.json",
+    "data/observations/ld06-front-target-20261022.json"
+  ],
+  "chassis_geometry": {
+    "length_m": 0.25,
+    "width_m": 0.23,
+    "lidar_x_m_estimate": 0.08,
+    "lidar_x_m_range": [
+      0.075,
+      0.085
+    ],
+    "lidar_y_m_estimate": 0.0,
+    "source": "Human physical measurement, 22 October 2026"
+  },
+  "lidar_yaw_candidate": {
+    "yaw_rad": -1.497,
+    "yaw_deg": -85.8,
+    "raw_zero_direction": "chassis right, per sensor arrow and front-target scan",
+    "front_wall_fit_deg": [
+      -85.86,
+      -85.87,
+      -85.74,
+      -85.73
+    ],
+    "wall_alignment": "human positioned chassis front edge parallel to wall; absolute alignment error not measured",
+    "status": "candidate, not installed"
+  }
+}

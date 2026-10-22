@@ -1,0 +1,25 @@
+# Local credentials, sessions, environments, and generated code.
+.venv/
+.runtime/
+__pycache__/
+*.py[cod]
+.DS_Store
+tmp/
+
+# Third-party checkouts and downloaded model weights stay local.
+vendor/
+models/
+weights/
+
+# Private runtime evidence is opt-in. Only reviewed numeric samples are tracked.
+data/
+records/
+*.jpg
+*.jpeg
+*.png
+*.mjpeg
+*.mp4
+*.posegraph
+*.data
+*.jsonl
+*.tgz

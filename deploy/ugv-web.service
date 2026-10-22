@@ -1,0 +1,27 @@
+[Unit]
+Description=UGV02 camera and guarded supervised bench interface
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ugvpi
+Group=ugvpi
+SupplementaryGroups=video dialout
+WorkingDirectory=/home/ugvpi/ugv_rpi
+RuntimeDirectory=ugv-web
+RuntimeDirectoryMode=0700
+Environment=PYTHONUNBUFFERED=1
+Environment=UGV_CAMERA_DEVICE=/dev/v4l/by-id/usb-USB_USB-video-index0
+ExecStart=/home/ugvpi/ugv_rpi/ugv-env/bin/python /home/ugvpi/ugv_rpi/app.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

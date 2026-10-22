@@ -1,0 +1,8 @@
+{
+  "configuration_id": "REPLACE_WITH_MEASURED_LIDAR_CONFIGURATION",
+  "rooms": ["room-a", "room-b"],
+  "doorways": [{"id": "a-to-b", "from_room": "room-a", "to_room": "room-b"}],
+  "start_room": "room-a",
+  "duration_s": 600,
+  "travel_m": 10
+}
