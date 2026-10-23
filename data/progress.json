@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-22",
+  "updated": "2026-10-23",
   "stage": "Observation-only LiDAR map saved; adaptive direct-PWM motion coded but not live-validated; metric driving not operational",
   "physical_context_last_confirmed": "14 October: wheels on clear floor, camera fixed forward, people/pets/cables/drops excluded, human beside robot with STOP visible",
   "bench_forward_physical_motion": "human confirmed wheels moved",
@@ -13,7 +13,8 @@
   "depth_veto_validated": false,
   "rooms_visited": [],
   "return_route_verified": false,
-  "next_action": "Restore Pi network connectivity, deploy the local adaptive controller, then live-validate PWM speed tracking and LiDAR-measured turn/distance completion across battery levels; record stopping envelope and VL53L5CX zone orientation before authorising metric navigation.",
+  "next_action": "Diagnose charging or battery power path before further deployment or movement: the robot was physically dark, charger stayed green, and a brief Pi network appearance ended before telemetry could be read. Once stable, read pack voltage and deploy/validate the local adaptive controller; record stopping envelope and VL53L5CX zone orientation before authorising metric navigation.",
+  "power_status": "23 October: user reported robot dark with chassis power switch on and supplied charger remaining green when connected. Pi briefly answered at ugvpi.local / 192.168.86.45, then stopped responding before SSH or voltage telemetry; user reported it dead again. Full charge is unverified. See records/power-dropout-20261023.md.",
   "first_floor_trial": "2 seconds continuous motor command; backwards approx 125 mm reported by human; stopped",
   "floor_direction_mapping": "Raw -50/-50 drives physical forward. During turns, telemetry odl tracked physical right wheels and odr tracked physical left wheels. Balanced logical PWM -80/+80 produced a physical right spin; opposite direction not verified.",
   "latest_experiment": "data/experiments/20261022-120648-e6db40",
